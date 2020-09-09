@@ -232,7 +232,8 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     # the loop multi-threading friendly.
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
     prog = Progress(length(idcs_missing), dt = 5, desc="Evaluating: ")
-    losses[idcs_missing] .= GCMAES.pmap(idcs_missing) do i
+    fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
+    losses[idcs_missing] .= fmap(idcs_missing) do i
         l = loss(pop[i], grammar)
         if GCMAES.myrank() == 0
             next!(prog, showvalues = [(:loss, l), (:best_loss, best_loss)])
