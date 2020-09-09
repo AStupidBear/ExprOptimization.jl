@@ -1,7 +1,7 @@
 
 module GeneticPrograms
 
-using ExprRules
+using ExprRules, GCMAES
 using StatsBase, Random
 
 using ExprOptimization: ExprOptAlgorithm, ExprOptResult, BoundedPriorityQueue, enqueue!
@@ -225,7 +225,7 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     # Pre-compute indics that are missing to make
     # the loop multi-threading friendly.
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
-    Threads.@threads for i in idcs_missing
+    losses[idcs_missing] .= GCMAES.pmap(idcs_missing) do i
         losses[i] = loss(pop[i], grammar)
     end
 
