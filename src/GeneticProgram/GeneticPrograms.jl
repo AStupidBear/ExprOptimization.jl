@@ -1,8 +1,9 @@
 
 module GeneticPrograms
 
-using ExprRules, GCMAES
 using StatsBase, Random
+using BSON, ProgressMeter
+using ExprRules, GCMAES
 
 using ExprOptimization: ExprOptAlgorithm, ExprOptResult, BoundedPriorityQueue, enqueue!
 import ExprOptimization: optimize
@@ -125,9 +126,13 @@ Koza, "Genetic programming: on the programming of computers by means of natural 
 Three operators are implemented: reproduction, crossover, and mutation.
 """
 function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss::Function; 
-    verbose::Bool=false)
+    verbose::Bool=false, save::Bool=true, resume=true)
     dmap = mindepth_map(grammar)
-    pop0 = initialize(p.init_method, p.pop_size, grammar, typ, dmap, p.max_depth)
+    if resume && isfile("pop.bson")
+        pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
+    else
+        pop0 = initialize(p.init_method, p.pop_size, grammar, typ, dmap, p.max_depth)
+    end
     pop1 = Vector{RuleNode}(undef,p.pop_size)
     losses0 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
     losses1 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
@@ -157,6 +162,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss)
+        save && BSON.bson("pop.bson", pop = pop0)
     end
     alg_result = Dict{Symbol,Any}()
     _add_result!(alg_result, p.track_method)
@@ -225,8 +231,13 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     # Pre-compute indics that are missing to make
     # the loop multi-threading friendly.
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
+    prog = Progress(length(idcs_missing), dt = 5, desc="Evaluating: ")
     losses[idcs_missing] .= GCMAES.pmap(idcs_missing) do i
-        losses[i] = loss(pop[i], grammar)
+        l = loss(pop[i], grammar)
+        if GCMAES.myrank() == 0
+            next!(prog, showvalues = [(:loss, l), (:best_loss, best_loss)])
+        end
+        return l
     end
 
     perm = sortperm(losses)
