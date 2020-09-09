@@ -137,9 +137,9 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     losses0 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
     losses1 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
 
-    best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf)
+    best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose)
     for iter = 1:p.iterations
-        verbose && println("iterations: $iter of $(p.iterations), best loss: $best_loss")
+        verbose && println("iterations: $iter of $(p.iterations), best_loss: $best_loss")
         fill!(losses1, missing)
         i = 0
         while i < p.pop_size
@@ -161,7 +161,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         end
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
-        best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss)
+        best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose)
         save && BSON.bson("pop.bson", pop = pop0)
     end
     alg_result = Dict{Symbol,Any}()
@@ -226,7 +226,7 @@ end
 Evaluate the loss function for population and sort.  Update the globally best tree, if needed.
 """
 function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vector{RuleNode}, 
-    losses::Vector{Union{Float64,Missing}}, best_tree::RuleNode, best_loss::Float64)
+    losses::Vector{Union{Float64,Missing}}, best_tree::RuleNode, best_loss::Float64; verbose=false)
 
     # Pre-compute indics that are missing to make
     # the loop multi-threading friendly.
