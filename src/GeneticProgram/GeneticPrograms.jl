@@ -139,8 +139,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
 
     best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose=verbose)
     for iter = 1:p.iterations
-        verbose && GCMAES.myrank() == 0 && 
-        println("iterations: $iter of $(p.iterations), best_loss: $best_loss")
+        @master verbose && println("iterations: $iter of $(p.iterations), best_loss: $best_loss")
         fill!(losses1, missing)
         i = 0
         while i < p.pop_size
@@ -163,7 +162,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
-        save && BSON.bson("pop.bson", pop = pop0)
+        @master save && BSON.bson("pop.bson", pop = pop0)
     end
     alg_result = Dict{Symbol,Any}()
     _add_result!(alg_result, p.track_method)
@@ -237,7 +236,7 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     losses[idcs_missing] .= fmap(idcs_missing) do i
         l = loss(pop[i], grammar)
         if GCMAES.myrank() == 0
-            next!(prog, showvalues = [(:loss, l), (:best_loss, best_loss)])
+            next!(prog, showvalues = [(:loss, l)])
         end
         return l
     end
