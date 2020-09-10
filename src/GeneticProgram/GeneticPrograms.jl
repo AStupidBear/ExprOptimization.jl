@@ -139,7 +139,8 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
 
     best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose=verbose)
     for iter = 1:p.iterations
-        verbose && println("iterations: $iter of $(p.iterations), best_loss: $best_loss")
+        verbose && GCMAES.myrank() == 0 && 
+        println("iterations: $iter of $(p.iterations), best_loss: $best_loss")
         fill!(losses1, missing)
         i = 0
         while i < p.pop_size
