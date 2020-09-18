@@ -138,8 +138,8 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     losses1 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
 
     best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose=verbose)
-    best_expr = get_executable(best_tree, grammar)
     for iter = 1:p.iterations
+        best_expr = get_executable(best_tree, grammar)
         @master verbose && println("iterations: $iter of $(p.iterations), best_loss: $best_loss, best_expr: $best_expr")
         fill!(losses1, missing)
         i = 0
