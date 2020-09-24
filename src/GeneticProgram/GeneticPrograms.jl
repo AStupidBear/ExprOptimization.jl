@@ -163,7 +163,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
-        @master save && BSON.bson("pop.bson", pop = pop0)
+        @master save && BSON.bson("pop.bson", pop = pop0, expr = string.(get_executable.(pop, Ref(grammar))))
     end
     alg_result = Dict{Symbol,Any}()
     _add_result!(alg_result, p.track_method)
