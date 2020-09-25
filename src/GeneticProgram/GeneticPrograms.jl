@@ -35,6 +35,7 @@ struct GeneticProgram <: ExprOptAlgorithm
     pop_size::Int
     iterations::Int
     max_depth::Int
+    parsimony_coefficient::Float64
     p_operators::Weights
     init_method::InitializationMethod
     select_method::SelectionMethod
@@ -44,6 +45,7 @@ struct GeneticProgram <: ExprOptAlgorithm
         pop_size::Int,                          #population size 
         iterations::Int,                        #number of generations 
         max_depth::Int,                         #maximum depth of derivation tree
+        parsimony_coefficient::Float64,         #parsimony coefficient
         p_reproduction::Float64,                #probability of reproduction operator 
         p_crossover::Float64,                   #probability of crossover operator
         p_mutation::Float64;                    #probability of mutation operator 
@@ -52,7 +54,7 @@ struct GeneticProgram <: ExprOptAlgorithm
         track_method::TrackingMethod=NoTracking())   #tracking method 
 
         p_operators = Weights([p_reproduction, p_crossover, p_mutation])
-        new(pop_size, iterations, max_depth, p_operators, init_method, select_method, track_method)
+        new(pop_size, iterations, max_depth, parsimony_coefficient, p_operators, init_method, select_method, track_method)
     end
 end
 
@@ -232,14 +234,16 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     # Pre-compute indics that are missing to make
     # the loop multi-threading friendly.
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
-    prog = Progress(length(idcs_missing), dt = 5, desc="Evaluating: ")
+    prog = Progress(length(idcs_missing), desc="Evaluating: ")
     fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
     losses[idcs_missing] .= fmap(idcs_missing) do i
         l = loss(pop[i], grammar)
+        pen = p.parsimony_coefficient * length(pop[i])
         if GCMAES.myrank() == 0
-            next!(prog, showvalues = [(:loss, l)])
+            ex = get_executable(pop[i], grammar)
+            next!(prog, showvalues = [(:loss, l), (:penalty, pen), (:expr, ex)])
         end
-        return l
+        return l + pen
     end
 
     perm = sortperm(losses)
