@@ -37,7 +37,7 @@ struct GeneticProgram <: ExprOptAlgorithm
     iterations::Int
     max_depth::Int
     parsimony_coefficient::Float64
-    p_point_mutation::Float64
+    p_point_replace::Float64
     p_operators::Weights
     init_method::InitializationMethod
     select_method::SelectionMethod
@@ -58,8 +58,8 @@ struct GeneticProgram <: ExprOptAlgorithm
         select_method::SelectionMethod=TournamentSelection(),   #selection method 
         track_method::TrackingMethod=NoTracking())   #tracking method 
 
-        p_operators = Weights([p_reproduction, p_crossover, p_subtree_mutation, p_hoist_mutation])
-        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_mutation, p_operators, init_method, select_method, track_method)
+        p_operators = Weights([p_reproduction, p_crossover, p_subtree_mutation, p_hoist_mutation, p_point_mutation])
+        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, p_operators, init_method, select_method, track_method)
     end
 end
 
@@ -192,7 +192,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
                 pop1[i+=1] = child1                
             elseif op == :point_mutation
                 ind1,_ = select(p.select_method, pop0, losses0)
-                child1 = point_mutation(ind1, grammar, p.point_replace)
+                child1 = point_mutation(ind1, grammar, p.p_point_replace)
                 pop1[i+=1] = child1
             end
         end
@@ -381,18 +381,18 @@ random nodes from it to be replaced. Terminals are replaced by other terminals a
 are replaced by other functions that require the same number of arguments as the original node. 
 The resulting tree forms an offspring in the next generation.
 """
-point_mutation(a::RuleNode, grammar::Grammar, point_replace::Float64) = 
-    point_mutation!(deepcopy(a), grammar, point_mutation)
-function point_mutation!(a, grammar, point_replace)
-    if rand() < point_replace
-        a._val = iseval(grammar, a) ? Core.eval(a, grammar) : a._val
+point_mutation(a::RuleNode, grammar::Grammar, p_point_replace::Float64) = 
+    point_mutation!(deepcopy(a), grammar, p_point_replace)
+function point_mutation!(a, grammar, p_point_replace)
+    if rand() < p_point_replace
+        a._val = iseval(grammar, a.ind) ? Core.eval(a, grammar) : a._val
         a.ind = filter(eachindex(grammar.rules)) do r
             return_type(grammar, r) == return_type(grammar, a) &&
-            child_types(garmmar, r) == child_types(grammar, a)
+            child_types(grammar, r) == child_types(grammar, a)
         end |> rand
     end
     for c in a.children
-        point_mutation!(c, grammar, point_mutation)
+        point_mutation!(c, grammar, p_point_replace)
     end
     return a
 end
