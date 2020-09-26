@@ -147,8 +147,8 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     for iter = 1:p.iterations
         @master if verbose 
             best_expr = get_executable(best_tree, grammar)
-            best_val_loss = loss(best_tree, grammar, validation = true)
-            print("iterations: $iter of $(p.iterations), best_loss: $best_loss")
+            best_val_loss = loss(best_tree, grammar, train = false)
+            print("iterations: $iter of $(p.iterations), best_loss: $best_loss, ")
             println("best_val_loss: $best_val_loss, best_expr: $best_expr")
         end
         fill!(losses1, missing)
@@ -174,7 +174,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
                 pop1[i+=1] = child1                
             elseif op == :point_mutation
                 ind1,_ = select(p.select_method, pop0, losses0)
-                child1 = point_mutation(ind1, grammar, dmap, p.max_depth, p.point_replace)
+                child1 = point_mutation(ind1, grammar, p.point_replace)
                 pop1[i+=1] = child1
             end
         end
@@ -341,11 +341,18 @@ to form an offspring in the next generation.
 """
 function hoist_mutation(a::RuleNode, grammar::Grammar, dmap::AbstractVector{Int}, max_depth::Int)
     child = deepcopy(a)
-    loc = sample(NodeLoc, child)
-    subtree = get(child, loc)
-    subloc = sample(NodeLoc, subtree)
-    subsubtree = get(subtree, subloc)
-    insert!(child, loc, subsubtree)
+    for i in 1:3
+        loc = sample(NodeLoc, child)
+        subtree = get(child, loc)
+        for j in 1:3
+            subloc = sample(NodeLoc, subtree)
+            subsubtree = get(subtree, subloc)
+            if return_type(grammar, subsubtree) == return_type(grammar, subtree)
+                insert!(child, loc, subsubtree)
+                return child
+            end
+        end
+    end
     child
 end
 
@@ -357,9 +364,9 @@ random nodes from it to be replaced. Terminals are replaced by other terminals a
 are replaced by other functions that require the same number of arguments as the original node. 
 The resulting tree forms an offspring in the next generation.
 """
-point_mutation(a::RuleNode, grammar::Grammar, dmap::AbstractVector{Int}, max_depth::Int, point_replace::Float64) = 
-    point_mutation!(deepcopy(a), grammar,dmap, max_depth, point_mutation)
-function point_mutation!(a, grammar, dmap, max_depth, point_replace)
+point_mutation(a::RuleNode, grammar::Grammar, point_replace::Float64) = 
+    point_mutation!(deepcopy(a), grammar, point_mutation)
+function point_mutation!(a, grammar, point_replace)
     if rand() < point_replace
         a._val = iseval(grammar, a) ? Core.eval(a, grammar) : a._val
         a.ind = filter(eachindex(grammar.rules)) do r
@@ -368,7 +375,7 @@ function point_mutation!(a, grammar, dmap, max_depth, point_replace)
         end |> rand
     end
     for c in a.children
-        point_mutation!(c, grammar, dmap, max_depth, point_mutation)
+        point_mutation!(c, grammar, point_mutation)
     end
     return a
 end
@@ -383,10 +390,12 @@ end
 
 function rand_full(grammar, typ, dmap, max_depth, bin=nothing)
     rules = grammar[typ]
-    if max_depth > 1
-        rule_index = StatsBase.sample(filter(r->!isterminal(grammar, r) && dmap[r] ≤ max_depth, rules))
+    rules = filter(r->dmap[r] ≤ max_depth, rules)
+    rules_nonterm = filter(r -> !isterminal(grammar, r), rules)
+    if isempty(rules_nonterm)
+        rule_index = StatsBase.sample(rules)
     else
-        rule_index = StatsBase.sample(filter(r->dmap[r] ≤ max_depth, rules))
+        rule_index = StatsBase.sample(rules_nonterm)
     end
 
     rulenode = iseval(grammar, rule_index) ?
