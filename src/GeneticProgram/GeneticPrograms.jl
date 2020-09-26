@@ -229,7 +229,7 @@ Random population initialization.
 """
 function initialize(::RandomInit, pop_size::Int, grammar::Grammar, typ::Symbol, 
     dmap::AbstractVector{Int}, max_depth::Int)
-    [randtree(grammar, typ, dmap, rand(1:max_depth)) for i = 1:pop_size]
+    [randtree(grammar, typ, dmap, rand(2:max_depth)) for i = 1:pop_size]
 end
 
 """
@@ -343,7 +343,7 @@ function subtree_mutation(a::RuleNode, grammar::Grammar, dmap::AbstractVector{In
     d_node = node_depth(child, mutatepoint)
     d_max = max_depth + 1 - d_node
     if d_max > 0
-        subtree = randtree(grammar, typ, dmap, rand(1:d_max))
+        subtree = randtree(grammar, typ, dmap, rand(min(1, d_max):d_max))
         insert!(child, loc, subtree)
     end
     child
