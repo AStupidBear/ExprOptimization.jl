@@ -1,7 +1,7 @@
 
 module GeneticPrograms
 
-using StatsBase, Random
+using StatsBase, Random, Logging
 using BSON, ProgressMeter
 using ExprRules, GCMAES
 using TensorBoardLogger
@@ -133,7 +133,7 @@ Koza, "Genetic programming: on the programming of computers by means of natural 
 Three operators are implemented: reproduction, crossover, and mutation.
 """
 function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss::Function; 
-    verbose::Bool=false, save::Bool=true, resume=true)
+    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout = 60)
     dmap = mindepth_map(grammar)
     if resume && isfile("pop.bson")
         pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
@@ -143,7 +143,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     pop1 = Vector{RuleNode}(undef,p.pop_size)
     losses0 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
     losses1 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
-    logger = TBLogger()
+    t⁻, logger = 0.0, TBLogger()
 
     best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose=verbose)
     for iter = 1:p.iterations
@@ -153,14 +153,21 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
             print("iterations: $iter of $(p.iterations), best_loss: $best_loss, ")
             println("best_val_loss: $best_val_loss, best_expr: $best_expr")
         end
-        t⁻ = @master if save && time() - t⁻ > 10
+        t⁻ = @master if save && time() - t⁻ > timeout
+            losses = Vector{Float32}(filter(!ismissing, losses0))
             exprs = string.(get_executable.(pop0, Ref(grammar)))
-            BSON.bson("pop.bson", pop = pop0, exprs = exprs, losses = losses0)
+            mat = unique(first, zip(exprs, losses))[1:min(10, end)]
+            mat = permutedims(reduce(hcat, collect.(mat)))
+            table = to_table(mat, header_row = ["expr", "loss"])
+            BSON.bson("pop.bson", pop = pop0, exprs = unique(exprs))
             with_logger(logger) do
-                @info "train" loss=best_loss topk=collect(p.track_method.q)
+                losses = losses[1:100:end] .+ 1
+                @info "train" loss=best_loss losses=losses table=table
                 @info "test" loss=best_val_loss
             end
-            t⁻ = time()
+            time()
+        else
+            t⁻
         end
         fill!(losses1, missing)
         i = 0
@@ -418,6 +425,35 @@ function rand_full(grammar, typ, dmap, max_depth, bin=nothing)
         end
     end
     return rulenode
+end
+
+function to_table(cur_matrix::Matrix; header_row = [], title = nothing)
+    cur_table = ""
+    if title != nothing
+        cur_table *= "<h2 style='padding: 10px'>$title</h2>"
+    end
+    # cur_table *= "<table class='table table-striped'>"
+    cur_table *= "<table>"
+    if !isempty(header_row)
+        cur_table *= "<thead><tr>"
+        for cur_header in header_row
+        cur_table *= "<th>$cur_header</th>"
+        end
+        cur_table *= "</tr></thead>"
+    end
+    cur_table *= "<tbody>"
+    for ii in 1:size(cur_matrix, 1)
+        cur_table *= "<tr>"
+        for jj in 1:size(cur_matrix, 2)
+        cur_table *= "<td>"
+        cur_table *= string(cur_matrix[ii, jj])
+        cur_table *= "</td>"
+        end
+        cur_table *= "</tr>"
+    end
+    cur_table *= "</tbody>"
+    cur_table *= "</table>"
+    return cur_table
 end
 
 end #module
