@@ -4,6 +4,7 @@ module GeneticPrograms
 using StatsBase, Random
 using BSON, ProgressMeter
 using ExprRules, GCMAES
+using TensorBoardLogger
 
 using ExprOptimization: ExprOptAlgorithm, ExprOptResult, BoundedPriorityQueue, enqueue!
 import ExprOptimization: optimize
@@ -142,14 +143,24 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     pop1 = Vector{RuleNode}(undef,p.pop_size)
     losses0 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
     losses1 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
+    logger = TBLogger()
 
     best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, pop0[1], Inf; verbose=verbose)
     for iter = 1:p.iterations
+        best_expr = get_executable(best_tree, grammar)
+        best_val_loss = loss(best_tree, grammar, train = false)
         @master if verbose 
-            best_expr = get_executable(best_tree, grammar)
-            best_val_loss = loss(best_tree, grammar, train = false)
             print("iterations: $iter of $(p.iterations), best_loss: $best_loss, ")
             println("best_val_loss: $best_val_loss, best_expr: $best_expr")
+        end
+        t⁻ = @master if save && time() - t⁻ > 10
+            exprs = string.(get_executable.(pop0, Ref(grammar)))
+            BSON.bson("pop.bson", pop = pop0, exprs = exprs, losses = losses0)
+            with_logger(logger) do
+                @info "train" loss=best_loss topk=collect(p.track_method.q)
+                @info "test" loss=best_val_loss
+            end
+            t⁻ = time()
         end
         fill!(losses1, missing)
         i = 0
@@ -181,7 +192,6 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
-        @master save && BSON.bson("pop.bson", pop = pop0, expr = string.(get_executable.(pop0, Ref(grammar))))
     end
     alg_result = Dict{Symbol,Any}()
     _add_result!(alg_result, p.track_method)
