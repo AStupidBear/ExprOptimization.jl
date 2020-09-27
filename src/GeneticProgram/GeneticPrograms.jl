@@ -58,7 +58,7 @@ struct GeneticProgram <: ExprOptAlgorithm
         hall_of_fame::Int=30,
         init_method::InitializationMethod=RandomInit(),      #initialization method 
         select_method::SelectionMethod=TournamentSelection(),   #selection method
-        track_method::TrackingMethod = TopKTracking(hall_of_fame))
+        track_method::TrackingMethod=TopKTracking(hall_of_fame))
 
         p_operators = Weights([p_reproduction, p_crossover, p_subtree_mutation, p_hoist_mutation, p_point_mutation])
         new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, hall_of_fame, p_operators, init_method, select_method, track_method)
@@ -135,7 +135,7 @@ Koza, "Genetic programming: on the programming of computers by means of natural 
 Three operators are implemented: reproduction, crossover, and mutation.
 """
 function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss::Function; 
-    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout::Float64=60)
+    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout::Float64=60.0)
     dmap = mindepth_map(grammar)
     if resume && isfile("pop.bson")
         pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
