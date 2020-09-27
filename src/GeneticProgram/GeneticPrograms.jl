@@ -482,6 +482,7 @@ function const_localopt!(tree::RuleNode, loss::Function, grammar::Grammar, p_con
     node = rand(nodes)
     v = node._val
     vs = [Core.eval(grammar, node.ind) for n in 1:n_const_localopt]
+    l = isnan(l) ? typemax(l) : l
     for v′ in unique(vs)
         l′ = loss(tree, grammar)
         if l′ < l
