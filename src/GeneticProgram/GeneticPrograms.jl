@@ -38,6 +38,7 @@ struct GeneticProgram <: ExprOptAlgorithm
     max_depth::Int
     parsimony_coefficient::Float64
     p_point_replace::Float64
+    hall_of_fame::Int
     p_operators::Weights
     init_method::InitializationMethod
     select_method::SelectionMethod
@@ -54,12 +55,13 @@ struct GeneticProgram <: ExprOptAlgorithm
         p_hoist_mutation::Float64,              #probability of hoist mutation operator 
         p_point_mutation::Float64,              #probability of point mutation operator 
         p_point_replace::Float64;               #probability of point replace 
+        hall_of_fame::Int=30,
         init_method::InitializationMethod=RandomInit(),      #initialization method 
-        select_method::SelectionMethod=TournamentSelection(),   #selection method 
-        track_method::TrackingMethod=NoTracking())   #tracking method 
+        select_method::SelectionMethod=TournamentSelection(),   #selection method
+        track_method::TrackingMethod = TopKTracking(hall_of_fame))
 
         p_operators = Weights([p_reproduction, p_crossover, p_subtree_mutation, p_hoist_mutation, p_point_mutation])
-        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, p_operators, init_method, select_method, track_method)
+        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, hall_of_fame, p_operators, init_method, select_method, track_method)
     end
 end
 
@@ -133,7 +135,7 @@ Koza, "Genetic programming: on the programming of computers by means of natural 
 Three operators are implemented: reproduction, crossover, and mutation.
 """
 function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss::Function; 
-    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout = 60)
+    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout::Float64=60)
     dmap = mindepth_map(grammar)
     if resume && isfile("pop.bson")
         pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
@@ -156,7 +158,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         t⁻ = @master if save && time() - t⁻ > timeout
             losses = Vector{Float32}(filter(!ismissing, losses0))
             exprs = string.(get_executable.(pop0, Ref(grammar)))
-            mat = unique(first, zip(exprs, losses))[1:min(10, end)]
+            mat = unique(first, zip(exprs, losses))[1:min(p.hall_of_fame, end)]
             mat = permutedims(reduce(hcat, collect.(mat)))
             table = to_table(mat, header_row = ["expr", "loss"])
             BSON.bson("pop.bson", pop = pop0, exprs = unique(exprs))
