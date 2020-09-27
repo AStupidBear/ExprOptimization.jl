@@ -38,6 +38,8 @@ struct GeneticProgram <: ExprOptAlgorithm
     max_depth::Int
     parsimony_coefficient::Float64
     p_point_replace::Float64
+    p_const_localopt::Float64
+    n_const_localopt::Int
     hall_of_fame::Int
     p_operators::Weights
     init_method::InitializationMethod
@@ -54,14 +56,17 @@ struct GeneticProgram <: ExprOptAlgorithm
         p_subtree_mutation::Float64,            #probability of subtree mutation operator 
         p_hoist_mutation::Float64,              #probability of hoist mutation operator 
         p_point_mutation::Float64,              #probability of point mutation operator 
-        p_point_replace::Float64;               #probability of point replace 
-        hall_of_fame::Int=30,
+        p_point_replace::Float64,               #probability of point replace 
+        p_const_localopt::Float64;              #probability of constant local optimization
+        n_const_localopt::Int=10,               #number of constant local optimization
+        hall_of_fame::Int=100,                  #number of individuals to track
         init_method::InitializationMethod=RandomInit(),      #initialization method 
         select_method::SelectionMethod=TournamentSelection(),   #selection method
         track_method::TrackingMethod=TopKTracking(hall_of_fame))
 
         p_operators = Weights([p_reproduction, p_crossover, p_subtree_mutation, p_hoist_mutation, p_point_mutation])
-        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, hall_of_fame, p_operators, init_method, select_method, track_method)
+        new(pop_size, iterations, max_depth, parsimony_coefficient, p_point_replace, p_const_localopt, 
+            n_const_localopt, hall_of_fame, p_operators, init_method, select_method, track_method)
     end
 end
 
@@ -172,7 +177,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
             t⁻
         end
         fill!(losses1, missing)
-        operate!(p, loss, grammar, pop0, pop1, losses0, losses1)
+        operate!(p, loss, grammar, dmap, pop0, pop1, losses0, losses1)
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
@@ -232,7 +237,7 @@ function select(p::TruncationSelection, pop::Vector{RuleNode},
     pop[i], i
 end
 
-function operate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop0::Vector{RuleNode}, 
+function operate!(p::GeneticProgram, loss::Function, grammar::Grammar, dmap::AbstractVector{Int}, pop0::Vector{RuleNode}, 
     pop1::Vector{RuleNode}, losses0::Vector{Union{Float64,Missing}}, losses1::Vector{Union{Float64,Missing}})
     fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
     res = fmap(1:p.pop_size) do i
@@ -261,8 +266,8 @@ function operate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop0::Vec
         end
         return pop1[i], losses1[i]
     end
-    pop1 .= res[1]
-    losses1 .= res[2]
+    pop1 .= first.(res)
+    losses1 .= last.(res)
     return nothing
 end
 
@@ -280,18 +285,17 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
     prog = Progress(length(idcs_missing), desc="Evaluating: ")
     fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
-    pop[idcs_missing] .= fmap(idcs_missing) do i
-        optimize_consts!(pop[i])
-    end
-    losses[idcs_missing] .= fmap(idcs_missing) do i
-        l = loss(pop[i], grammar)
+    res = fmap(idcs_missing) do i
+        l = const_localopt!(pop[i], loss, grammar, p.p_const_localopt, p.n_const_localopt)
         pen = p.parsimony_coefficient * length(pop[i])
         if GCMAES.myrank() == 0
             ex = get_executable(pop[i], grammar)
             next!(prog, showvalues = [(:loss, l), (:penalty, pen), (:expr, ex)])
         end
-        return l + pen, pop[i]
+        return pop[i], l + pen
     end
+    pop[idcs_missing] .= first.(res)
+    losses[idcs_missing] .= last.(res)
 
     perm = sortperm(losses)
     pop[:], losses[:] = pop[perm], losses[perm]
@@ -470,11 +474,14 @@ function to_table(cur_matrix::Matrix; header_row = [], title = nothing)
     return cur_table
 end
 
-function optimize_consts!(tree::RuleNode, loss::function, grammar::Grammar, nevals::Int = 100)
-    node = rand(eval_nodes(tree, grammar))
+function const_localopt!(tree::RuleNode, loss::Function, grammar::Grammar, p_const_localopt::Float64, n_const_localopt::Int)
     l = loss(tree, grammar)
+    rand() > p_const_localopt && return l
+    nodes = eval_nodes(tree, grammar)
+    isempty(nodes) && return l
+    node = rand(nodes)
     v = node._val
-    vs = [Core.eval(grammar, node.ind) for n in 1:nevals]
+    vs = [Core.eval(grammar, node.ind) for n in 1:n_const_localopt]
     for v′ in unique(vs)
         l′ = loss(tree, grammar)
         if l′ < l
@@ -482,7 +489,7 @@ function optimize_consts!(tree::RuleNode, loss::function, grammar::Grammar, neva
         end
     end
     node._val = v
-    return tree
+    return l
 end
 
 function eval_nodes(node::RuleNode, grammar::Grammar, nodes::Vector{RuleNode} = RuleNode[])
