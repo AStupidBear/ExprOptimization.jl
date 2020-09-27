@@ -140,7 +140,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
     if resume && isfile("pop.bson")
         pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
     else
-        pop0 = initialize(p.init_method, p.pop_size, grammar, typ, dmap, p.max_depth)
+        pop0 = @master initialize(p.init_method, p.pop_size, grammar, typ, dmap, p.max_depth)
     end
     pop1 = Vector{RuleNode}(undef,p.pop_size)
     losses0 = Vector{Union{Float64,Missing}}(missing,p.pop_size)
@@ -172,32 +172,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
             t⁻
         end
         fill!(losses1, missing)
-        i = 0
-        while i < p.pop_size
-            op = sample(OPERATORS, p.p_operators)
-            if op == :reproduction
-                ind1,j = select(p.select_method, pop0, losses0)
-                pop1[i+=1] = ind1
-                losses1[i] = losses0[j]
-            elseif op == :crossover
-                ind1,_ = select(p.select_method, pop0, losses0)
-                ind2,_ = select(p.select_method, pop0, losses0)
-                child = crossover(ind1, ind2, grammar, p.max_depth)
-                pop1[i+=1] = child
-            elseif op == :subtree_mutation
-                ind1,_ = select(p.select_method, pop0, losses0)
-                child1 = subtree_mutation(ind1, grammar, dmap, p.max_depth)
-                pop1[i+=1] = child1
-            elseif op == :hoist_mutation
-                ind1,_ = select(p.select_method, pop0, losses0)
-                child1 = hoist_mutation(ind1, grammar, dmap, p.max_depth)
-                pop1[i+=1] = child1                
-            elseif op == :point_mutation
-                ind1,_ = select(p.select_method, pop0, losses0)
-                child1 = point_mutation(ind1, grammar, p.p_point_replace)
-                pop1[i+=1] = child1
-            end
-        end
+        operate!(p, loss, grammar, pop0, pop1, losses0, losses1)
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
@@ -257,6 +232,40 @@ function select(p::TruncationSelection, pop::Vector{RuleNode},
     pop[i], i
 end
 
+function operate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop0::Vector{RuleNode}, 
+    pop1::Vector{RuleNode}, losses0::Vector{Union{Float64,Missing}}, losses1::Vector{Union{Float64,Missing}})
+    fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
+    res = fmap(1:p.pop_size) do i
+        op = sample(OPERATORS, p.p_operators)
+        if op == :reproduction
+            ind1,j = select(p.select_method, pop0, losses0)
+            pop1[i] = ind1
+            losses1[i] = losses0[j]
+        elseif op == :crossover
+            ind1,_ = select(p.select_method, pop0, losses0)
+            ind2,_ = select(p.select_method, pop0, losses0)
+            child = crossover(ind1, ind2, grammar, p.max_depth)
+            pop1[i] = child
+        elseif op == :subtree_mutation
+            ind1,_ = select(p.select_method, pop0, losses0)
+            child1 = subtree_mutation(ind1, grammar, dmap, p.max_depth)
+            pop1[i] = child1
+        elseif op == :hoist_mutation
+            ind1,_ = select(p.select_method, pop0, losses0)
+            child1 = hoist_mutation(ind1, grammar, dmap, p.max_depth)
+            pop1[i] = child1                
+        elseif op == :point_mutation
+            ind1,_ = select(p.select_method, pop0, losses0)
+            child1 = point_mutation(ind1, grammar, p.p_point_replace)
+            pop1[i] = child1
+        end
+        return pop1[i], losses1[i]
+    end
+    pop1 .= res[1]
+    losses1 .= res[2]
+    return nothing
+end
+
 """
     evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vector{RuleNode}, losses::Vector{Union{Float64,Missing}}, 
         best_tree::RuleNode, best_loss::Float64)
@@ -271,6 +280,9 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
     prog = Progress(length(idcs_missing), desc="Evaluating: ")
     fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
+    pop[idcs_missing] .= fmap(idcs_missing) do i
+        optimize_consts!(pop[i])
+    end
     losses[idcs_missing] .= fmap(idcs_missing) do i
         l = loss(pop[i], grammar)
         pen = p.parsimony_coefficient * length(pop[i])
@@ -278,7 +290,7 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
             ex = get_executable(pop[i], grammar)
             next!(prog, showvalues = [(:loss, l), (:penalty, pen), (:expr, ex)])
         end
-        return l + pen
+        return l + pen, pop[i]
     end
 
     perm = sortperm(losses)
@@ -385,7 +397,7 @@ The resulting tree forms an offspring in the next generation.
 """
 point_mutation(a::RuleNode, grammar::Grammar, p_point_replace::Float64) = 
     point_mutation!(deepcopy(a), grammar, p_point_replace)
-function point_mutation!(a, grammar, p_point_replace)
+function point_mutation!(a::RuleNode, grammar::Grammar, p_point_replace::Float64)
     if rand() < p_point_replace
         a._val = iseval(grammar, a.ind) ? Core.eval(a, grammar) : a._val
         a.ind = filter(eachindex(grammar.rules)) do r
@@ -399,15 +411,15 @@ function point_mutation!(a, grammar, p_point_replace)
     return a
 end
 
-function randtree(grammar, typ, dmap, d_max)
+function randtree(grammar::Grammar, typ::Symbol, dmap::AbstractVector{Int}, max_depth::Int)
     if rand() < 0.5
-        rand(RuleNode, grammar, typ, dmap, d_max)
+        rand(RuleNode, grammar, typ, dmap, max_depth)
     else
-        rand_full(grammar, typ, dmap, d_max)
+        rand_full(grammar, typ, dmap, max_depth)
     end
 end
 
-function rand_full(grammar, typ, dmap, max_depth, bin=nothing)
+function rand_full(grammar::Grammar, typ::Symbol, dmap::AbstractVector{Int}, max_depth::Int, bin::Union{NodeRecycler,Nothing}=nothing)
     rules = grammar[typ]
     rules = filter(r->dmap[r] ≤ max_depth, rules)
     rules_nonterm = filter(r -> !isterminal(grammar, r), rules)
@@ -456,6 +468,29 @@ function to_table(cur_matrix::Matrix; header_row = [], title = nothing)
     cur_table *= "</tbody>"
     cur_table *= "</table>"
     return cur_table
+end
+
+function optimize_consts!(tree::RuleNode, loss::function, grammar::Grammar, nevals::Int = 100)
+    node = rand(eval_nodes(tree, grammar))
+    l = loss(tree, grammar)
+    v = node._val
+    vs = [Core.eval(grammar, node.ind) for n in 1:nevals]
+    for v′ in unique(vs)
+        l′ = loss(tree, grammar)
+        if l′ < l
+            l, v = l′, v′
+        end
+    end
+    node._val = v
+    return tree
+end
+
+function eval_nodes(node::RuleNode, grammar::Grammar, nodes::Vector{RuleNode} = RuleNode[])
+    iseval(grammar, node.ind) && push!(nodes, node)
+    for child in node.children
+        eval_nodes(child, grammar, nodes)
+    end
+    return nodes
 end
 
 end #module
