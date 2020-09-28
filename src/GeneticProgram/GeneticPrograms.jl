@@ -283,7 +283,7 @@ function evaluate!(p::GeneticProgram, loss::Function, grammar::Grammar, pop::Vec
     # Pre-compute indics that are missing to make
     # the loop multi-threading friendly.
     idcs_missing = filter(i -> ismissing(losses[i]), eachindex(pop))
-    prog = Progress(length(idcs_missing), desc="Evaluating: ")
+    prog = Progress(length(idcs_missing) ÷ GCMAES.worldsize(), desc="Evaluating: ")
     fmap = GCMAES.worldsize() > 1 ? GCMAES.pmap : map
     res = fmap(idcs_missing) do i
         l = const_localopt!(pop[i], loss, grammar, p.p_const_localopt, p.n_const_localopt)
