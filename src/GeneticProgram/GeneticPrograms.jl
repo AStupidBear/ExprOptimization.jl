@@ -140,7 +140,7 @@ Koza, "Genetic programming: on the programming of computers by means of natural 
 Three operators are implemented: reproduction, crossover, and mutation.
 """
 function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss::Function; 
-    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout::Float64=60.0)
+    verbose::Bool=false, save::Bool=true, resume::Bool=true, timeout::Float64=60.0, cb = (a...) -> nothing)
     dmap = mindepth_map(grammar)
     if resume && isfile("pop.bson")
         pop0 = Vector{RuleNode}(BSON.load("pop.bson")[:pop])
@@ -181,6 +181,7 @@ function genetic_program(p::GeneticProgram, grammar::Grammar, typ::Symbol, loss:
         pop0, pop1 = pop1, pop0
         losses0, losses1 = losses1, losses0
         best_tree, best_loss = evaluate!(p, loss, grammar, pop0, losses0, best_tree, best_loss; verbose=verbose)
+        cb(best_tree, grammar)
     end
     alg_result = Dict{Symbol,Any}()
     _add_result!(alg_result, p.track_method)
